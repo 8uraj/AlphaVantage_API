@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Visualizer</title>
+    
+    <!-- Import Google Fonts and Chart.js -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.2.1/dist/chart.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .input-container {
+            margin-bottom: 20px;
+        }
+
+        label {
+            font-size: 16px;
+            color: #333;
+            margin-right: 10px;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            width: 200px;
+            border: 2px solid #ccc;
+            border-radius: 5px;
+            margin-right: 10px;
+            font-size: 16px;
+        }
+
+        input[type="button"] {
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        input[type="button"]:hover {
+            background-color: #45a049;
+        }
+
+        input[type="button"].loading {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Loading spinner */
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            animation: spin 1s linear infinite;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #graph-area {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            max-width: 1000px;
+            margin: 30px auto;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+
+        canvas#myChart {
+            max-width: 100%;
+            height: 400px; /* Set a specific height */
+        }
+
+        .reminder {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #666;
+            text-align: center;
+        }
+
+        .reminder a {
+            color: #007BFF;
+            text-decoration: none;
+        }
+
+        .reminder a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Interactive Stock Visualizer</h2>
+
+    <div class="input-container">
+        <label for="ticker-input">Enter Stock Symbol:</label>
+        <input type="text" id="ticker-input" placeholder="e.g., AAPL">
+        <input type="button" value="Submit" id="submit-btn">
+        <div id="spinner-container"></div>
+    </div>
+
+    <div id="graph-area">
+        <canvas id="myChart"></canvas>
+    </div>
+
+    <div class="reminder">
+        Friendly reminder: if the graphing function stops working after several successful instances, it is likely that you have reached the 5 requests/minute rate limit of the free Alpha Vantage API key. The graph should work again in the next minute or after you obtain a <a href="https://www.alphavantage.co/premium/" target="_blank">premium API key</a>.
+    </div>
+
+    <script>
+        $(document).ready(function() {
+            // Fetch initial data for AAPL when page loads
+            fetchStockData('AAPL');
+
+            // Handle button click for fetching stock data
+            $('#submit-btn').click(function() {
+                var tickerText = $('#ticker-input').val();
+                if (tickerText) {
+                    $('#submit-btn').addClass('loading').prop('disabled', true);
+                    $('#spinner-container').html('<div class="spinner"></div>');
+                    fetchStockData(tickerText);
+                } else {
+                    alert("Please enter a stock symbol.");
+                }
+            });
+
+            // Function to fetch stock data and plot graph
+            function fetchStockData(ticker) {
+                $.ajax({
+                    type: "POST",
+                    url: "/get_stock_data/",
+                    data: { 'ticker': ticker },
+                    success: function(res) {
+                        plotGraph(res);
+                        $('#submit-btn').removeClass('loading').prop('disabled', false);
+                        $('#spinner-container').html('');
+                    },
+                    error: function() {
+                        alert("Error fetching data.");
+                        $('#submit-btn').removeClass('loading').prop('disabled', false);
+                        $('#spinner-container').html('');
+                    }
+                });
+            }
+
+            // Function to plot graph using Chart.js
+            function plotGraph(res) {
+                var tickerDisplay = res['prices']['Meta Data']['2. Symbol'];
+                var graphTitle = tickerDisplay + ' (data for the trailing 500 trading days)';
+                var priceSeries = res['prices']['Time Series (Daily)'];
+                var smaSeries = res['sma']['Technical Analysis: SMA'];
+
+                var daily_adjusted_close = [], dates = [], sma_data = [];
+
+                for (let key in priceSeries) {
+                    daily_adjusted_close.push(Number(priceSeries[key]['5. adjusted close']));
+                    dates.push(key);
+                }
+                for (let key in smaSeries) {
+                    sma_data.push(Number(smaSeries[key]['SMA']));
+                }
+
+                // Reverse arrays and slice to last 500 days
+                daily_adjusted_close = daily_adjusted_close.reverse().slice(0, 500);
+                sma_data = sma_data.reverse().slice(0, 500);
+                dates = dates.reverse().slice(0, 500);
+
+                // Remove old canvas and add a new one for re-rendering
+                $('#myChart').remove();
+                $('#graph-area').append('<canvas id="myChart"></canvas>');
+                var ctx = document.getElementById('myChart').getContext('2d');
+
+                // Plot new graph
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: [
+                            {
+                                label: 'Daily Adjusted Close',
+                                data: daily_adjusted_close,
+                                borderColor: 'green',
+                                fill: false,
+                                tension: 0.1
+                            },
+                            {
+                                label: 'Simple Moving Average (SMA)',
+                                data: sma_data,
+                                borderColor: 'blue',
+                                fill: false,
+                                tension: 0.1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'top' },
+                            title: { display: true, text: graphTitle }
+                        },
+                        scales: {
+                            y: { beginAtZero: false }
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
